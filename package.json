@@ -1,8 +1,10 @@
 {
   "private": true,
   "name": "account-tool",
-  "description": "stuff",
-  "version": "0.0.1",
+  "description": "aaa",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
   "author": {
     "name": "Your Name",
     "email": "your@email.com",
