@@ -1,0 +1,17 @@
+{
+  "private": true,
+  "name": "account-tool",
+  "description": "stuff",
+  "version": "0.0.1",
+  "author": {
+    "name": "Your Name",
+    "email": "your@email.com",
+    "url": "https://yourwebsite.com"
+  },
+  "scripts": {
+  },
+  "dependencies": {},
+  "devDependencies": {
+  },
+  "packageManager": "npm@11.12.1"
+}
