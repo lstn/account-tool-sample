@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="gradBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+    <linearGradient id="gradGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80" />
+      <stop offset="100%" stop-color="#16a34a" />
+    </linearGradient>
+    <linearGradient id="gradOrange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#ea580c" />
+    </linearGradient>
+    
+    <!-- Shadow -->
+    <filter id="cardShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- Group centered and scaled up to fill the 128x128 box -->
+  <!-- Previously scales were 0.75, 0.85, 1.0. Now increasing to ~1.1x base size and adjusting offsets -->
+  
+  <!-- Card 1 (Back, Smallest) -->
+  <!-- Was: translate(64, 45) scale(0.75) -->
+  <g transform="translate(64, 50) scale(0.95) rotate(-15)">
+    <rect x="-40" y="-40" width="80" height="80" rx="18" fill="url(#gradGreen)" filter="url(#cardShadow)" />
+    <!-- Abstract content -->
+    <circle cx="0" cy="-12" r="10" fill="rgba(255,255,255,0.7)" />
+    <rect x="-16" y="6" width="32" height="6" rx="3" fill="rgba(255,255,255,0.5)" />
+    <rect x="-16" y="16" width="20" height="6" rx="3" fill="rgba(255,255,255,0.5)" />
+  </g>
+
+  <!-- Card 2 (Middle) -->
+  <!-- Was: translate(64, 55) scale(0.85) -->
+  <g transform="translate(64, 60) scale(1.1) rotate(-7)">
+    <rect x="-40" y="-40" width="80" height="80" rx="18" fill="url(#gradOrange)" filter="url(#cardShadow)" />
+    <!-- Abstract content -->
+    <circle cx="0" cy="-12" r="10" fill="rgba(255,255,255,0.7)" />
+    <rect x="-16" y="6" width="32" height="6" rx="3" fill="rgba(255,255,255,0.5)" />
+    <rect x="-16" y="16" width="20" height="6" rx="3" fill="rgba(255,255,255,0.5)" />
+  </g>
+
+  <!-- Card 3 (Front, Main) -->
+  <!-- Was: translate(64, 68) scale(1) -->
+  <!-- Increased scale to 1.25 to fill more space (80 * 1.25 = 100px width) -->
+  <g transform="translate(64, 72) scale(1.25) rotate(0)">
+    <rect x="-40" y="-40" width="80" height="80" rx="18" fill="url(#gradBlue)" filter="url(#cardShadow)" />
+    <!-- User Icon (Main) -->
+    <circle cx="0" cy="-10" r="14" fill="#ffffff" />
+    <path d="M0 8 c-14 0 -20 8 -20 16 v2 h40 v-2 c0 -8 -6 -16 -20 -16 z" fill="#ffffff" />
+  </g>
+</svg>
