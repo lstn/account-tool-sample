@@ -1,332 +1,446 @@
 "use strict";
+
+/**
+ * Background service worker for MultiAccount Manager
+ * Manages cookies, tabs, and coordinates with content scripts
+ */
 (() => {
-    function c(...t) {
-        console.log("[MultiAccount][bg]", ...t)
+    /**
+     * Logging utility
+     */
+    function log(...args) {
+        console.log("[MultiAccount][bg]", ...args);
     }
-    function C(t) {
+
+    /**
+     * Extract hostname from URL
+     */
+    function extractHostname(url) {
         try {
-            return new URL(t)
-                .hostname
+            return new URL(url).hostname;
         } catch {
-            return ""
+            return "";
         }
     }
-    function k(t) {
-        return new Promise(async (o, r) => {
+
+    /**
+     * Get all cookies for a URL (including domain cookies)
+     */
+    function getAllCookies(url) {
+        return new Promise(async (resolve, reject) => {
             try {
-                let e = new Promise(s => {
-                        chrome.cookies.getAll({
-                            url: t
-                        }, p => {
-                            s(chrome.runtime.lastError ? [] : p)
-                        })
-                    }),
-                    a = C(t);
-                if (!a) {
-                    let s = await e;
-                    o(S(s));
-                    return
+                // Get cookies specific to the URL
+                const urlCookiesPromise = new Promise((resolve) => {
+                    chrome.cookies.getAll({ url }, (cookies) => {
+                        resolve(chrome.runtime.lastError ? [] : cookies);
+                    });
+                });
+
+                const hostname = extractHostname(url);
+                if (!hostname) {
+                    const urlCookies = await urlCookiesPromise;
+                    resolve(formatCookies(urlCookies));
+                    return;
                 }
-                let n = a.split("."),
-                    i = n.length > 1 ? n.slice(-2)
-                    .join(".") : a,
-                    u = new Promise(s => {
-                        chrome.cookies.getAll({
-                            domain: i
-                        }, p => {
-                            s(chrome.runtime.lastError ? [] : p)
-                        })
-                    }),
-                    [l, m] = await Promise.all([e, u]),
-                    d = [...l],
-                    g = new Set(l.map(s => y(s)));
-                for (let s of m) {
-                    let p = y(s);
-                    g.has(p) || (d.push(s), g.add(p))
+
+                // Split hostname to get domain
+                const hostParts = hostname.split(".");
+                const domain = hostParts.length > 1 ? hostParts.slice(-2).join(".") : hostname;
+
+                // Get cookies for the domain
+                const domainCookiesPromise = new Promise((resolve) => {
+                    chrome.cookies.getAll({ domain }, (cookies) => {
+                        resolve(chrome.runtime.lastError ? [] : cookies);
+                    });
+                });
+
+                const [urlCookies, domainCookies] = await Promise.all([urlCookiesPromise, domainCookiesPromise]);
+                const allCookies = [...urlCookies];
+                const cookieSet = new Set(urlCookies.map((c) => getCookieKey(c)));
+
+                // Add domain cookies that aren't already in the URL cookies
+                for (const cookie of domainCookies) {
+                    const key = getCookieKey(cookie);
+                    if (!cookieSet.has(key)) {
+                        allCookies.push(cookie);
+                        cookieSet.add(key);
+                    }
                 }
-                o(S(d))
-            } catch (e) {
-                r(e)
+
+                resolve(formatCookies(allCookies));
+            } catch (error) {
+                reject(error);
             }
-        })
+        });
     }
-    function y(t) {
-        return `${t.storeId}::${t.name}::${t.domain}::${t.path}`
+
+    /**
+     * Generate unique key for a cookie
+     */
+    function getCookieKey(cookie) {
+        return `${cookie.storeId}::${cookie.name}::${cookie.domain}::${cookie.path}`;
     }
-    function S(t) {
-        return t.map(o => ({
-            name: o.name,
-            value: o.value,
-            domain: o.domain,
-            path: o.path,
-            secure: o.secure,
-            httpOnly: o.httpOnly,
-            expirationDate: o.expirationDate,
-            sameSite: o.sameSite,
-            storeId: o.storeId
-        }))
+
+    /**
+     * Format cookies into a consistent structure
+     */
+    function formatCookies(cookies) {
+        return cookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            expirationDate: cookie.expirationDate,
+            sameSite: cookie.sameSite,
+            storeId: cookie.storeId
+        }));
     }
-    function f(t) {
-        return new Promise((o, r) => {
+
+    /**
+     * Clear all cookies for a URL
+     */
+    function clearCookies(url) {
+        return new Promise((resolve, reject) => {
             try {
-                chrome.cookies.getAll({
-                    url: t
-                }, e => {
-                    let a = chrome.runtime.lastError;
-                    if (a) {
-                        r(a);
-                        return
+                chrome.cookies.getAll({ url }, (cookies) => {
+                    const lastError = chrome.runtime.lastError;
+                    if (lastError) {
+                        reject(lastError);
+                        return;
                     }
-                    let n = e.length;
-                    if (!n) {
-                        o();
-                        return
+
+                    const totalCount = cookies.length;
+                    if (!totalCount) {
+                        resolve();
+                        return;
                     }
-                    e.forEach(i => {
-                        chrome.cookies.remove({
-                            url: t,
-                            name: i.name
-                        }, () => {
-                            n -= 1, n || o()
-                        })
-                    })
-                })
-            } catch (e) {
-                r(e)
+
+                    let removedCount = 0;
+                    cookies.forEach((cookie) => {
+                        chrome.cookies.remove({ url, name: cookie.name }, () => {
+                            removedCount += 1;
+                            if (removedCount === totalCount) {
+                                resolve();
+                            }
+                        });
+                    });
+                });
+            } catch (error) {
+                reject(error);
             }
-        })
+        });
     }
-    function b(t, o) {
-        return new Promise((r, e) => {
+
+    /**
+     * Set cookies for a URL
+     */
+    function setCookies(url, cookies) {
+        return new Promise((resolve, reject) => {
             try {
-                if (!o.length) {
-                    r();
-                    return
+                if (!cookies.length) {
+                    resolve();
+                    return;
                 }
-                let a = o.length;
-                o.forEach(n => {
-                    let i = t;
-                    if (n.domain) {
-                        let l = n.secure ? "https://" : "http://",
-                            m = n.domain.startsWith(".") ? n.domain.substring(1) : n.domain;
-                        i = `${l}${m}${n.path||"/"}`
+
+                let pendingCount = cookies.length;
+                cookies.forEach((cookie) => {
+                    let targetUrl = url;
+
+                    if (cookie.domain) {
+                        const protocol = cookie.secure ? "https://" : "http://";
+                        const domain = cookie.domain.startsWith(".") ? cookie.domain.substring(1) : cookie.domain;
+                        targetUrl = `${protocol}${domain}${cookie.path || "/"}`;
                     }
-                    let u = {
-                        url: i,
-                        name: n.name,
-                        value: n.value,
-                        path: n.path,
-                        secure: n.secure,
-                        httpOnly: n.httpOnly,
-                        expirationDate: n.expirationDate,
-                        sameSite: n.sameSite,
-                        storeId: n.storeId
+
+                    const cookieDetails = {
+                        url: targetUrl,
+                        name: cookie.name,
+                        value: cookie.value,
+                        path: cookie.path,
+                        secure: cookie.secure,
+                        httpOnly: cookie.httpOnly,
+                        expirationDate: cookie.expirationDate,
+                        sameSite: cookie.sameSite,
+                        storeId: cookie.storeId
                     };
-                    n.domain && (u.domain = n.domain), chrome.cookies.set(u, l => {
-                        a -= 1, a || r()
-                    })
-                })
-            } catch (a) {
-                e(a)
+
+                    if (cookie.domain) {
+                        cookieDetails.domain = cookie.domain;
+                    }
+
+                    chrome.cookies.set(cookieDetails, () => {
+                        pendingCount -= 1;
+                        if (pendingCount === 0) {
+                            resolve();
+                        }
+                    });
+                });
+            } catch (error) {
+                reject(error);
             }
-        })
-    }
-    function h(t, o) {
-        return new Promise((r, e) => {
-            try {
-                chrome.tabs.sendMessage(t, o, a => {
-                    let n = chrome.runtime.lastError;
-                    n ? e(n) : r(a)
-                })
-            } catch (a) {
-                e(a)
-            }
-        })
-    }
-    async function T(t) {
-        if (chrome.scripting) await chrome.scripting.executeScript({
-            target: {
-                tabId: t
-            },
-            files: ["content.js"]
         });
-        else return new Promise((o, r) => {
-            chrome.tabs.executeScript(t, {
-                file: "content.js"
-            }, () => {
-                let e = chrome.runtime.lastError;
-                e ? r(e) : o()
-            })
-        })
     }
-    async function A(t) {
-        try {
-            await h(t, {
-                type: "PING"
-            })
-        } catch (o) {
-            let r = (o == null ? void 0 : o.message) || "";
-            if (r.includes("Receiving end does not exist") || r.includes("Could not establish connection")) c("Content script not found, trying to inject...", t), await T(t), await new Promise(e => setTimeout(e, 100));
-            else throw o
+
+    /**
+     * Send message to content script
+     */
+    function sendMessageToTab(tabId, message) {
+        return new Promise((resolve, reject) => {
+            try {
+                chrome.tabs.sendMessage(tabId, message, (response) => {
+                    const error = chrome.runtime.lastError;
+                    if (error) {
+                        reject(error);
+                    } else {
+                        resolve(response);
+                    }
+                });
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Inject content script if not already present
+     */
+    async function injectContentScript(tabId) {
+        if (chrome.scripting) {
+            // Manifest v3
+            await chrome.scripting.executeScript({
+                target: { tabId },
+                files: ["content.js"]
+            });
+        } else {
+            // Fallback for Manifest v2
+            return new Promise((resolve, reject) => {
+                chrome.tabs.executeScript(tabId, { file: "content.js" }, () => {
+                    const error = chrome.runtime.lastError;
+                    if (error) {
+                        reject(error);
+                    } else {
+                        resolve();
+                    }
+                });
+            });
         }
     }
-    async function M(t) {
-        await A(t);
-        let o = await h(t, {
-            type: "CAPTURE_PAGE_STATE"
-        });
-        if (!o) throw new Error("The content script is not responding; the current site may not support it or it may not have been injected yet.");
-        return o
+
+    /**
+     * Ensure content script is available on tab
+     */
+    async function ensureContentScript(tabId) {
+        try {
+            await sendMessageToTab(tabId, { type: "PING" });
+        } catch (error) {
+            const errorMsg = error?.message || "";
+            if (errorMsg.includes("Receiving end does not exist") || errorMsg.includes("Could not establish connection")) {
+                log("Content script not found, trying to inject...", tabId);
+                await injectContentScript(tabId);
+                // Wait a bit for script to load
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            } else {
+                throw error;
+            }
+        }
     }
-    async function P(t, o) {
-        await A(t), await h(t, {
+
+    /**
+     * Capture page state (cookies and localStorage) from a tab
+     */
+    async function capturePageState(tabId) {
+        await ensureContentScript(tabId);
+        const pageState = await sendMessageToTab(tabId, { type: "CAPTURE_PAGE_STATE" });
+        if (!pageState) {
+            throw new Error("The content script is not responding; the current site may not support it or it may not have been injected yet.");
+        }
+        return pageState;
+    }
+
+    /**
+     * Apply page state (localStorage) to a tab
+     */
+    async function applyPageState(tabId, pageState) {
+        await ensureContentScript(tabId);
+        await sendMessageToTab(tabId, {
             type: "APPLY_PAGE_STATE",
             payload: {
-                localStorage: o ? o.localStorage : {}
+                localStorage: pageState ? pageState.localStorage : {}
             }
-        })
+        });
     }
-    async function E(t) {
-        let {
-            tabId: o,
-            url: r
-        } = t.payload;
+
+    /**
+     * Handle CAPTURE_ACCOUNT_SNAPSHOT message
+     */
+    async function handleCaptureSnapshot(message) {
+        const { tabId, url } = message.payload;
         try {
-            let [e, a] = await Promise.all([k(r), M(o)]);
+            const [cookies, pageState] = await Promise.all([
+                getAllCookies(url),
+                capturePageState(tabId)
+            ]);
             return {
-                success: !0,
+                success: true,
                 snapshot: {
-                    cookies: e,
-                    pageState: a
+                    cookies,
+                    pageState
                 }
-            }
-        } catch (e) {
-            return c("capture error", e), {
-                success: !1,
-                error: (e == null ? void 0 : e.message) || String(e)
-            }
+            };
+        } catch (error) {
+            log("capture error", error);
+            return {
+                success: false,
+                error: error?.message || String(error)
+            };
         }
     }
-    async function w(t, o, r) {
-        await f(o), await b(o, r.cookies), await P(t, r.pageState), chrome.tabs.reload(t)
+
+    /**
+     * Apply snapshot (cookies and page state) to a tab
+     */
+    async function applySnapshot(tabId, url, snapshot) {
+        await clearCookies(url);
+        await setCookies(url, snapshot.cookies);
+        await applyPageState(tabId, snapshot.pageState);
+        chrome.tabs.reload(tabId);
     }
-    async function O(t) {
-        let {
-            tabId: o,
-            url: r,
-            snapshot: e
-        } = t.payload;
+
+    /**
+     * Handle APPLY_ACCOUNT_SNAPSHOT message
+     */
+    async function handleApplySnapshot(message) {
+        const { tabId, url, snapshot } = message.payload;
         try {
-            return await w(o, r, e), {
-                success: !0
-            }
-        } catch (a) {
-            return c("apply error", a), {
-                success: !1,
-                error: (a == null ? void 0 : a.message) || String(a)
-            }
+            await applySnapshot(tabId, url, snapshot);
+            return { success: true };
+        } catch (error) {
+            log("apply error", error);
+            return {
+                success: false,
+                error: error?.message || String(error)
+            };
         }
     }
-    async function _(t) {
-        let {
-            url: o,
-            snapshot: r
-        } = t.payload;
+
+    /**
+     * Handle OPEN_AND_APPLY_ACCOUNT_SNAPSHOT message
+     */
+    async function handleOpenAndApplySnapshot(message) {
+        const { url, snapshot } = message.payload;
         try {
-            let e = await chrome.tabs.create({
-                url: o,
-                active: !0
-            });
-            if (!e.id) throw new Error("Failed to create tab");
-            return await new Promise(a => {
-                let n = (i, u) => {
-                    i === e.id && u.status === "complete" && (chrome.tabs.onUpdated.removeListener(n), a())
+            const newTab = await chrome.tabs.create({ url, active: true });
+            if (!newTab.id) throw new Error("Failed to create tab");
+
+            // Wait for tab to load (with timeout)
+            await new Promise((resolve) => {
+                const listener = (tabId, changeInfo) => {
+                    if (tabId === newTab.id && changeInfo.status === "complete") {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }
                 };
-                chrome.tabs.onUpdated.addListener(n), setTimeout(() => {
-                    chrome.tabs.onUpdated.removeListener(n), a()
-                }, 15e3)
-            }), await w(e.id, o, r), {
-                success: !0
-            }
-        } catch (e) {
-            return c("open apply error", e), {
-                success: !1,
-                error: (e == null ? void 0 : e.message) || String(e)
-            }
+                chrome.tabs.onUpdated.addListener(listener);
+                setTimeout(() => {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }, 15000); // 15 second timeout
+            });
+
+            await applySnapshot(newTab.id, url, snapshot);
+            return { success: true };
+        } catch (error) {
+            log("open apply error", error);
+            return {
+                success: false,
+                error: error?.message || String(error)
+            };
         }
     }
-    async function D(t) {
-        let {
-            tabId: o,
-            url: r
-        } = t.payload;
+
+    /**
+     * Handle CLEAR_SITE_DATA message
+     */
+    async function handleClearSiteData(message) {
+        const { tabId, url } = message.payload;
         try {
-            return await f(r), await P(o, null), chrome.tabs.reload(o), {
-                success: !0
-            }
-        } catch (e) {
-            return c("clear data error", e), {
-                success: !1,
-                error: (e == null ? void 0 : e.message) || String(e)
-            }
+            await clearCookies(url);
+            await applyPageState(tabId, null);
+            chrome.tabs.reload(tabId);
+            return { success: true };
+        } catch (error) {
+            log("clear data error", error);
+            return {
+                success: false,
+                error: error?.message || String(error)
+            };
         }
     }
-    chrome.runtime.onMessage.addListener((t, o, r) => {
-        if (!(!t || typeof t.type != "string")) {
-            if (t.type === "PING") {
-                r({
-                    ok: !0
-                });
-                return
-            }
-            return (async () => {
-                    if (t.type === "CAPTURE_ACCOUNT_SNAPSHOT") {
-                        let e = await E(t);
-                        r(e);
-                        return
-                    }
-                    if (t.type === "APPLY_ACCOUNT_SNAPSHOT") {
-                        let e = await O(t);
-                        r(e);
-                        return
-                    }
-                    if (t.type === "OPEN_AND_APPLY_ACCOUNT_SNAPSHOT") {
-                        let e = await _(t);
-                        r(e);
-                        return
-                    }
-                    if (t.type === "CLEAR_SITE_DATA") {
-                        let e = await D(t);
-                        r(e);
-                        return
-                    }
-                    if (t.type === "DEBUG_LOG") {
-                        let {
-                            message: e,
-                            level: a
-                        } = t.payload;
-                        console.log(`[Forwarded][${a||"info"}] ${e}`);
-                        try {
-                            let n = await chrome.tabs.query({
-                                active: !0,
-                                lastFocusedWindow: !0
-                            });
-                            n && n.length > 0 && n[0].id && chrome.tabs.sendMessage(n[0].id, t)
-                                .catch(() => {})
-                        } catch {}
-                        r({
-                            success: !0
-                        });
-                        return
-                    }
-                })()
-                .catch(e => {
-                    c("unhandled error", e), r({
-                        success: !1,
-                        error: (e == null ? void 0 : e.message) || String(e)
-                    })
-                }), !0
+
+    /**
+     * Main message handler
+     */
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (!message || typeof message.type !== "string") {
+            return;
         }
+
+        if (message.type === "PING") {
+            sendResponse({ ok: true });
+            return;
+        }
+
+        (async () => {
+            if (message.type === "CAPTURE_ACCOUNT_SNAPSHOT") {
+                const response = await handleCaptureSnapshot(message);
+                sendResponse(response);
+                return;
+            }
+
+            if (message.type === "APPLY_ACCOUNT_SNAPSHOT") {
+                const response = await handleApplySnapshot(message);
+                sendResponse(response);
+                return;
+            }
+
+            if (message.type === "OPEN_AND_APPLY_ACCOUNT_SNAPSHOT") {
+                const response = await handleOpenAndApplySnapshot(message);
+                sendResponse(response);
+                return;
+            }
+
+            if (message.type === "CLEAR_SITE_DATA") {
+                const response = await handleClearSiteData(message);
+                sendResponse(response);
+                return;
+            }
+
+            if (message.type === "DEBUG_LOG") {
+                const { message: debugMessage, level } = message.payload;
+                console.log(`[Forwarded][${level || "info"}] ${debugMessage}`);
+                try {
+                    const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+                    if (activeTabs && activeTabs.length > 0 && activeTabs[0].id) {
+                        chrome.tabs.sendMessage(activeTabs[0].id, message).catch(() => {});
+                    }
+                } catch {
+                    // Ignore errors
+                }
+                sendResponse({ success: true });
+                return;
+            }
+        })().catch((error) => {
+            log("unhandled error", error);
+            sendResponse({
+                success: false,
+                error: error?.message || String(error)
+            });
+        });
+
+        return true;
     });
-    c("background loaded");
+
+    log("background loaded");
 })();

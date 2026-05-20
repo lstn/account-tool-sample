@@ -1,171 +1,249 @@
 "use strict";
+
+/**
+ * Content script for MultiAccount Manager
+ * Handles page state capture and restoration
+ */
 (() => {
-    var l = {
-            id: "default",
-            match: () => !0,
-            detect: t => {
-                let {
-                    localStorageSnapshot: e
-                } = t, o = e.username || e.user || e.account || "";
-                return {
-                    state: o ? "logged_in" : "unknown",
-                    username: o || void 0,
-                    hint: o ? `Detected username in local storage: ${o}` : "No login information detected (can be extended in the rule engine)",
-                    detectedAt: new Date()
-                        .toISOString()
-                }
-            }
-        },
-        g = {
-            id: "example.com",
-            match: t => t.endsWith("example.com"),
-            detect: t => {
-                let e = t.document.querySelector("a[href*='login']"),
-                    o = t.document.querySelector("a[href*='logout'], a[href*='signout']"),
-                    r = "unknown",
-                    n = "Example rule: Please adjust according to the actual site structure";
-                return o ? (r = "logged_in", n = "Exit/Sign out link found on the page") : e && (r = "logged_out", n = "Login link found on the page"), {
-                    state: r,
-                    hint: n,
-                    detectedAt: new Date()
-                        .toISOString()
-                }
-            }
-        },
-        f = [g, l];
-    function p(t) {
-        let e = t.toLowerCase();
-        for (let o of f)
-            if (o.match(e)) return o;
-        return l
-    }
-    function s(t, e, o) {
-        return p(t)
-            .detect({
-                hostname: t,
-                document: e,
-                localStorageSnapshot: o.localStorage
-            })
-    }
-    function S(t) {
-        if (!t) return "Unnamed website";
-        let e = t.trim();
-        if (!e) return "Unnamed website";
-        let o = [" - ", " | ", " _ ", " — ", "："];
-        for (let r of o)
-            if (e.includes(r)) {
-                let n = e.split(r);
-                if (n[0] && n[0].trim()
-                    .length > 0) return n[0].trim()
-            } return e.length <= 20 ? e : e.slice(0, 20) + "..."
-    }
-    function d(t) {
-        let e = t.querySelectorAll("link[rel*='icon']");
-        for (let o = 0; o < e.length; o++) {
-            let r = e[o];
-            if (r.href) return r.href
+    // Default detection rule - checks localStorage for user info
+    const defaultRule = {
+        id: "default",
+        match: () => true,
+        detect: ({ localStorageSnapshot }) => {
+            const username = localStorageSnapshot.username || localStorageSnapshot.user || localStorageSnapshot.account || "";
+            return {
+                state: username ? "logged_in" : "unknown",
+                username: username || undefined,
+                hint: username 
+                    ? `Detected username in local storage: ${username}` 
+                    : "No login information detected (can be extended in the rule engine)",
+                detectedAt: new Date().toISOString()
+            };
         }
+    };
+
+    // Example rule for detecting login state on websites
+    const exampleRule = {
+        id: "example.com",
+        match: (hostname) => hostname.endsWith("example.com"),
+        detect: ({ document }) => {
+            const loginLink = document.querySelector("a[href*='login']");
+            const logoutLink = document.querySelector("a[href*='logout'], a[href*='signout']");
+            let state = "unknown";
+            let hint = "Example rule: Please adjust according to the actual site structure";
+
+            if (logoutLink) {
+                state = "logged_in";
+                hint = "Exit/Sign out link found on the page";
+            } else if (loginLink) {
+                state = "logged_out";
+                hint = "Login link found on the page";
+            }
+
+            return {
+                state,
+                hint,
+                detectedAt: new Date().toISOString()
+            };
+        }
+    };
+
+    const detectionRules = [exampleRule, defaultRule];
+
+    /**
+     * Find applicable detection rule for hostname
+     */
+    function findRule(hostname) {
+        const lowerHostname = hostname.toLowerCase();
+        for (const rule of detectionRules) {
+            if (rule.match(lowerHostname)) {
+                return rule;
+            }
+        }
+        return defaultRule;
+    }
+
+    /**
+     * Detect login state for the current site
+     */
+    function detectLoginState(hostname, document, windowState) {
+        return findRule(hostname).detect({
+            hostname,
+            document,
+            localStorageSnapshot: windowState.localStorage
+        });
+    }
+
+    /**
+     * Extract clean site name from page title
+     */
+    function extractSiteName(pageTitle) {
+        if (!pageTitle) return "Unnamed website";
+        
+        const trimmed = pageTitle.trim();
+        if (!trimmed) return "Unnamed website";
+
+        const separators = [" - ", " | ", " _ ", " — ", "："];
+        for (const separator of separators) {
+            if (trimmed.includes(separator)) {
+                const parts = trimmed.split(separator);
+                if (parts[0] && parts[0].trim().length > 0) {
+                    return parts[0].trim();
+                }
+            }
+        }
+        
+        return trimmed.length <= 20 ? trimmed : trimmed.slice(0, 20) + "...";
+    }
+
+    /**
+     * Extract favicon URL from page
+     */
+    function extractFaviconUrl(document) {
+        const iconLinks = document.querySelectorAll("link[rel*='icon']");
+        for (let i = 0; i < iconLinks.length; i++) {
+            const link = iconLinks[i];
+            if (link.href) return link.href;
+        }
+
         try {
-            return new URL("/favicon.ico", t.location.origin)
-                .href
+            return new URL("/favicon.ico", document.location.origin).href;
         } catch {
-            return null
+            return null;
         }
     }
-    function u() {
-        let t = S(document.title),
-            e = d(document);
+
+    /**
+     * Extract site information from current page
+     */
+    function extractSiteInfo() {
+        const title = extractSiteName(document.title);
+        const iconUrl = extractFaviconUrl(document);
         return {
-            title: t,
-            iconUrl: e
-        }
+            title,
+            iconUrl
+        };
     }
-    function i(...t) {
-        console.log("[MultiAccount][cs]", ...t)
+
+    /**
+     * Logging utility
+     */
+    function log(...args) {
+        console.log("[MultiAccount][cs]", ...args);
     }
-    function h() {
-        let t = {};
+
+    /**
+     * Capture all localStorage data
+     */
+    function captureLocalStorage() {
+        const storage = {};
         try {
-            for (let e = 0; e < localStorage.length; e += 1) {
-                let o = localStorage.key(e);
-                if (o) try {
-                    let r = localStorage.getItem(o);
-                    r != null && (t[o] = r)
-                } catch {}
-            }
-        } catch (e) {
-            i("capture localStorage error", e)
-        }
-        return t
-    }
-    function m(t) {
-        try {
-            localStorage.clear(), Object.entries(t)
-                .forEach(([e, o]) => {
+            for (let i = 0; i < localStorage.length; i += 1) {
+                const key = localStorage.key(i);
+                if (key) {
                     try {
-                        localStorage.setItem(e, o)
-                    } catch {}
-                })
-        } catch (e) {
-            throw i("apply localStorage error", e), e
+                        const value = localStorage.getItem(key);
+                        if (value != null) {
+                            storage[key] = value;
+                        }
+                    } catch {
+                        // Skip items that can't be accessed
+                    }
+                }
+            }
+        } catch (error) {
+            log("capture localStorage error", error);
+        }
+        return storage;
+    }
+
+    /**
+     * Apply localStorage data to page
+     */
+    function applyLocalStorage(storageData) {
+        try {
+            localStorage.clear();
+            Object.entries(storageData).forEach(([key, value]) => {
+                try {
+                    localStorage.setItem(key, value);
+                } catch {
+                    // Skip items that can't be set
+                }
+            });
+        } catch (error) {
+            log("apply localStorage error", error);
+            throw error;
         }
     }
-    chrome.runtime.onMessage.addListener((t, e, o) => {
-        if (!(!t || typeof t.type != "string")) {
-            if (t.type === "PING") {
-                o({
-                    ok: !0
+
+    /**
+     * Handle messages from background script
+     */
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (!message || typeof message.type !== "string") {
+            return;
+        }
+
+        if (message.type === "PING") {
+            sendResponse({ ok: true });
+            return;
+        }
+
+        if (message.type === "CAPTURE_PAGE_STATE") {
+            try {
+                const hostname = window.location.hostname;
+                const pageState = {
+                    localStorage: captureLocalStorage()
+                };
+
+                try {
+                    pageState.loginInfo = detectLoginState(hostname, document, pageState);
+                } catch (error) {
+                    log("detect login state error", error);
+                }
+
+                try {
+                    pageState.siteInfo = extractSiteInfo();
+                } catch (error) {
+                    log("extract site info error", error);
+                }
+
+                sendResponse(pageState);
+            } catch (error) {
+                log("capture page state error", error);
+                sendResponse(null);
+            }
+            return true;
+        }
+
+        if (message.type === "APPLY_PAGE_STATE") {
+            try {
+                const { localStorage: storageData } = message.payload;
+                applyLocalStorage(storageData);
+                sendResponse({ success: true });
+            } catch (error) {
+                sendResponse({
+                    success: false,
+                    error: error?.message || String(error)
                 });
-                return
             }
-            if (t.type === "CAPTURE_PAGE_STATE") {
-                try {
-                    let r = window.location.hostname,
-                        c = {
-                            localStorage: h()
-                        };
-                    try {
-                        c.loginInfo = s(r, document, c)
-                    } catch (a) {
-                        i("detect login state error", a)
-                    }
-                    try {
-                        c.siteInfo = u()
-                    } catch (a) {
-                        i("extract site info error", a)
-                    }
-                    o(c)
-                } catch (r) {
-                    i("capture page state error", r), o(null)
-                }
-                return !0
+            return true;
+        }
+
+        if (message.type === "DEBUG_LOG") {
+            const { message: debugMessage, level } = message.payload;
+            const prefix = "[MultiAccount][Popup]";
+            if (level === "error") {
+                console.error(prefix, debugMessage);
+            } else if (level === "warn") {
+                console.warn(prefix, debugMessage);
+            } else {
+                console.log(prefix, debugMessage);
             }
-            if (t.type === "APPLY_PAGE_STATE") {
-                try {
-                    let {
-                        localStorage: r
-                    } = t.payload;
-                    m(r), o({
-                        success: !0
-                    })
-                } catch (r) {
-                    o({
-                        success: !1,
-                        error: (r == null ? void 0 : r.message) || String(r)
-                    })
-                }
-                return !0
-            }
-            if (t.type === "DEBUG_LOG") {
-                let {
-                    message: r,
-                    level: n
-                } = t.payload, c = "[MultiAccount][Popup]";
-                return n === "error" ? console.error(c, r) : n === "warn" ? console.warn(c, r) : console.log(c, r), o({
-                    success: !0
-                }), !0
-            }
+            sendResponse({ success: true });
+            return true;
         }
     });
-    i("content script loaded");
+
+    log("content script loaded");
 })();
